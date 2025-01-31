@@ -1,0 +1,168 @@
+// Fetch all relevant fields from EDW, from a single table or multiple joins via joins
+// Gather the data into temporary view or Common Table Expression, so that futher data manipulations will be done
+// In this example, for simplicity a single table is used to build a single CTE. 
+// Note that the single CTE could have been split up into separate CTES, each with a 'case' clause if tables used would have
+// been more than the one and where table joins could have caused performance issue. 
+// Tables from EDW when not properly indexed or not properly set up in star schema fashion would lead to cartesian product and very inefficient data fetch.
+
+// Data cleansing in the CTE in the  'Where' clause is used to filter out values that will have NULL columns. 
+//Data cleansing in the CTE via 'Case' clause. The value substitution to numerals will be used to rank the records.
+// The two sets of ranking are used on all the CTE records.
+// Fetch all customer records whwre each account will have multiple records , and thus rank them based on job-level 
+// of the account executive and the product sales role.
+// It is understood that higher the sales role in the historical data of the account, higher the ranking of the record.
+// Fetch the records where the month of the IMpact_Purchase_Date is in multiples of 6 from current month, so that the eligible records are extracted every 6 months.
+
+With 
+survey as 
+(Select CONTACTID, RECIPIENT_LAST_NAME, RECIPIENT_FIRST_NAME, RECIPIENT_NAME, RECIPIENT_EMAIL, 
+CONTACT_COUNTRY, 
+IMPACT_USER_ACCOUNT_CREATED_DATE, 
+ACCOUNT_NUMBER, ACCOUNT_NAME, INDUSTRY_SEGMENT, GEO, 
+MAJOR_AREA,AREA, REGION, DISTRICT, TERRITORY, 
+ABS(DATEDIFF(month, TO_DATE(current_date()), TO_DATE(IMPACT_PURCHASE_DATE)))  as MONTH_DIFF, 
+ACV_BANDING, 
+MARKET_SEGMENTATION, ACCOUNT_CUSTOMER_SINCE, 
+IMPACT_PACKAGE, IMPACT_PURCHASE_DATE, 
+IMPACT_FUNDAMENTALS_STATUS,  SUCCESS_STATUS, IMPACT_STATUS, 
+FIRST_IMPACT_SURVEY, "CS Sponsor", "CS Sponsor EMAIL", 
+"Customer Success Manager", 
+"Customer Success Manager Email", 
+"CSM Success Manager", 
+"CSM Success Manager Email", 
+"Success Architect", 
+"Success Architect Email", 
+"Platform Architect", 
+"Platform Architect Email", 
+"Support Account Manager", 
+"Support Account Manager Email", 
+"Training Solution Consultant", 
+"Training Solution Consultant Email", 
+"Services Executive", 
+"Services Executive Email", 
+"Account Executive", 
+"Account Executive Email", 
+"Account Executive Manager", 
+"Account Executive Manager Email", 
+"ProductBusinessUnitValue", 
+"StartDate", 
+"ContractEndDate", 
+"ProductSKU", 
+"ProductFullName", 
+survey.RECIPIENT_JOB_LEVEL, 
+survey.Impact_Role, 
+case 
+    WHEN  survey.Impact_Role = 'Impact Platform Owner'  THEN 1 
+    WHEN  survey.Impact_Role = 'Impact Executive'  THEN 2 
+    WHEN  survey.Impact_Role = 'Impact Admin' THEN 3 
+    WHEN  survey.Impact_Role = 'Impact Basic' THEN  4 
+    WHEN  survey.Impact_Role = 'Impact User' THEN  5 
+end as imp_role, 
+case 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'C-Level'  THEN 1 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'Manager/Sr'  THEN 2 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'Vice President/SVP'  Then 3 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'Director/Sr'  Then 4 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'Director%2FSr'  Then 5 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'Individual Contributor'  Then 6 
+    WHEN  survey.RECIPIENT_JOB_LEVEL =  'System Administrator'  Then 7 
+    WHEN  survey.RECIPIENT_JOB_LEVEL =  'Architect'  Then 8 
+    WHEN  survey.RECIPIENT_JOB_LEVEL =   'Developer/Engineer'  Then 9 
+    WHEN  NVL(survey.RECIPIENT_JOB_LEVEL,'a') =  'a' Then 10 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'Unknown'  Then 11 
+     WHEN  survey.RECIPIENT_JOB_LEVEL =  'Other' Then 12 
+    WHEN  survey.RECIPIENT_JOB_LEVEL =   'Student'  Then 13 
+    WHEN  survey.RECIPIENT_JOB_LEVEL =   'Press Analyst/Media'  Then 14 
+    else 14 
+end as job_level 
+,rank()  over ( partition by CONTACTID order by job_level,imp_role asc ) as rank 
+FROM 
+EDW_LS.CUSTOMER_EM.TBL_IMPACT_EXPERIENCE_SURVEY survey 
+WHERE 
+"ProductSKU" not in ( 'PROD16659' , 'PROD16378' , 'PROD16380') 
+AND survey.Impact_Role != 'Impact Permissions Authorizer' 
+AND survey.IMPACT_PACKAGE != 'impact-base' 
+and ABS(DATEDIFF(month, TO_DATE(current_date()), TO_DATE(IMPACT_PURCHASE_DATE)))  IN (6,12,18,24,30,36,42,48,54,60) 
+) 
+//
+// Data manipulation so that newest accounts who have purchased an impact product is within 6 months
+// This classification will be used to send a first-time survey.
+// Trim the set of records fetched for each eligible account to a single record with the rank value. 
+Select 
+DATEADD(DAY, 1, CURRENT_DATE()) AS TXN_DATE, 
+CONTACTID, RECIPIENT_LAST_NAME, RECIPIENT_FIRST_NAME, RECIPIENT_NAME, RECIPIENT_EMAIL, 
+CONTACT_COUNTRY, 
+IMPACT_USER_ACCOUNT_CREATED_DATE, 
+ACCOUNT_NUMBER, ACCOUNT_NAME, INDUSTRY_SEGMENT, GEO, 
+MAJOR_AREA,AREA, REGION, DISTRICT, TERRITORY, ACV_BANDING, 
+MARKET_SEGMENTATION, ACCOUNT_CUSTOMER_SINCE, 
+IMPACT_PACKAGE, IMPACT_PURCHASE_DATE, 
+IMPACT_FUNDAMENTALS_STATUS,   
+SUCCESS_STATUS, IMPACT_STATUS, 
+case 
+      when CONTACT_COUNTRY = 'AO' then 'PT' 
+     when CONTACT_COUNTRY = 'AR' then 'ES' 
+     when CONTACT_COUNTRY = 'BR' then 'PT-BR' 
+     when CONTACT_COUNTRY = 'CL' then 'ES' 
+    when CONTACT_COUNTRY = 'CR' then 'ES' 
+   when CONTACT_COUNTRY = 'CU' then 'ES' 
+    when CONTACT_COUNTRY = 'CV' then 'PT' 
+    when CONTACT_COUNTRY = 'DE' then 'DE' 
+     when CONTACT_COUNTRY = 'DO' then 'ES' 
+     when CONTACT_COUNTRY = 'EC' then 'ES' 
+     when CONTACT_COUNTRY = 'ES' then 'PT-ES' 
+     when CONTACT_COUNTRY = 'FR' then 'FR' 
+    when CONTACT_COUNTRY = 'GT' then 'ES' 
+   when CONTACT_COUNTRY = 'GW' then 'PT' 
+    when CONTACT_COUNTRY = 'HN' then 'ES' 
+    when CONTACT_COUNTRY = 'IT' then 'IT' 
+     when CONTACT_COUNTRY = 'JP' then 'JA' 
+     when CONTACT_COUNTRY = 'KR' then 'KO' 
+     when CONTACT_COUNTRY = 'MX' then 'ES' 
+     when CONTACT_COUNTRY = 'NI' then 'ES' 
+    when CONTACT_COUNTRY = 'NL' then 'NL' 
+   when CONTACT_COUNTRY = 'PA' then 'ES' 
+    when CONTACT_COUNTRY = 'PE' then 'ES' 
+    when CONTACT_COUNTRY = 'PT' then 'PT' 
+     when CONTACT_COUNTRY = 'PY' then 'ES' 
+     when CONTACT_COUNTRY = 'RU' then 'RU' 
+     when CONTACT_COUNTRY = 'ST' then 'PT' 
+     when CONTACT_COUNTRY = 'SV' then 'ES' 
+    when CONTACT_COUNTRY = 'UY' then 'ES' 
+   when CONTACT_COUNTRY = 'VE' then 'ES' 
+    else 'EN'   
+end as Language 
+, case     
+      when 
+ABS(DATEDIFF(month, TO_DATE(current_date()), TO_DATE(IMPACT_PURCHASE_DATE))) between 1 and 6 then 'True' 
+      else 'False' 
+end as FIRST_IMPACT_SURVEY, 
+NVL("CS Sponsor", 'John Doe')  as  "CS Sponsor", "CS Sponsor EMAIL", 
+"Customer Success Manager", 
+"Customer Success Manager Email", 
+"CSM Success Manager", 
+"CSM Success Manager Email", 
+"Success Architect", 
+"Success Architect Email", 
+"Platform Architect", 
+"Platform Architect Email", 
+"Support Account Manager", 
+"Support Account Manager Email", 
+"Training Solution Consultant", 
+"Training Solution Consultant Email", 
+"Services Executive", 
+"Services Executive Email", 
+"Account Executive", 
+"Account Executive Email", 
+"Account Executive Manager", 
+"Account Executive Manager Email", 
+"ProductBusinessUnitValue", 
+"StartDate", 
+"ContractEndDate", 
+"ProductSKU", 
+"ProductFullName", 
+survey.RECIPIENT_JOB_LEVEL, survey.Impact_Role, rank 
+FROM survey 
+WHERE 1=1 and survey.rank=1 ; 
+
+ 
